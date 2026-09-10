@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ethers } from 'ethers';
 import { BOT_CHAIN } from '../config';
@@ -9,6 +9,10 @@ function shorten(addr) {
 }
 
 const FALLBACK_IMAGE = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" fill="%23e7e5e4"><rect width="400" height="300"/><text x="50%25" y="50%25" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="18" fill="%2378716c">No image</text></svg>';
+
+function isSmokeTest(listing) {
+  return listing.title && listing.title.startsWith('Smoke Test');
+}
 
 export default function Home({ readContract, account, connect, isCorrectNetwork }) {
   const [listings, setListings] = useState([]);
@@ -40,6 +44,8 @@ export default function Home({ readContract, account, connect, isCorrectNetwork 
     }
     fetchListings();
   }, [readContract]);
+
+  const visibleListings = useMemo(() => listings.filter((item) => !isSmokeTest(item)), [listings]);
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
@@ -79,14 +85,14 @@ export default function Home({ readContract, account, connect, isCorrectNetwork 
 
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-stone-900">Marketplace listings</h2>
-        <span className="text-sm text-stone-500">{listings.length} item{listings.length === 1 ? '' : 's'}</span>
+        <span className="text-sm text-stone-500">{visibleListings.length} item{visibleListings.length === 1 ? '' : 's'}</span>
       </div>
 
       {loading ? (
         <p className="text-stone-500">Loading listings...</p>
       ) : error ? (
         <p className="text-red-600">{error}</p>
-      ) : listings.length === 0 ? (
+      ) : visibleListings.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-stone-200">
           <p className="text-stone-600 mb-4">No items are currently listed.</p>
           {account ? (
@@ -97,7 +103,7 @@ export default function Home({ readContract, account, connect, isCorrectNetwork 
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {listings.map((item) => {
+          {visibleListings.map((item) => {
             const price = ethers.formatEther(item.price);
             const isSeller = account && item.seller.toLowerCase() === account.toLowerCase();
             return (

@@ -8,6 +8,10 @@ function shorten(addr) {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+function isSmokeTest(listing) {
+  return listing.title && listing.title.startsWith('Smoke Test');
+}
+
 export default function Dashboard({ readContract, account, connect, isCorrectNetwork }) {
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,8 +52,8 @@ export default function Dashboard({ readContract, account, connect, isCorrectNet
     );
   }
 
-  const myListings = listings.filter((l) => l.seller.toLowerCase() === account.toLowerCase());
-  const myPurchases = listings.filter((l) => l.sold && l.buyer.toLowerCase() === account.toLowerCase());
+  const myListings = listings.filter((l) => !isSmokeTest(l) && l.seller.toLowerCase() === account.toLowerCase());
+  const myPurchases = listings.filter((l) => !isSmokeTest(l) && l.sold && l.buyer.toLowerCase() === account.toLowerCase());
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">

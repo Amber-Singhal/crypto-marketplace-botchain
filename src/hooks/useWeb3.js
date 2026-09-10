@@ -22,6 +22,31 @@ export function useWeb3() {
     return new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
   }, [signer]);
 
+  const setConnection = useCallback(async (browserProvider, accounts) => {
+    if (!browserProvider) return;
+    try {
+      const network = await browserProvider.getNetwork();
+      setChainId(Number(network.chainId));
+    } catch {
+      // ignore
+    }
+    if (accounts?.[0]) {
+      try {
+        const s = await browserProvider.getSigner();
+        setAccount(accounts[0]);
+        setSigner(s);
+        setProvider(browserProvider);
+      } catch {
+        setProvider(browserProvider);
+        setSigner(null);
+      }
+    } else {
+      setProvider(browserProvider);
+      setSigner(null);
+      setAccount(null);
+    }
+  }, []);
+
   const switchToBotChain = useCallback(async () => {
     if (!window.ethereum) throw new Error('MetaMask is not installed.');
     try {
@@ -49,22 +74,16 @@ export function useWeb3() {
     }
   }, []);
 
-  const refresh = useCallback(async () => {
+  const attemptAutoConnect = useCallback(async () => {
     if (!window.ethereum) return;
-    const browserProvider = new ethers.BrowserProvider(window.ethereum);
-    const network = await browserProvider.getNetwork();
-    setChainId(Number(network.chainId));
-    const accounts = await window.ethereum.request({ method: 'eth_accounts' });
-    if (accounts?.[0]) {
-      const s = await browserProvider.getSigner();
-      setAccount(accounts[0]);
-      setProvider(browserProvider);
-      setSigner(s);
-    } else {
-      setProvider(browserProvider);
-      setSigner(null);
+    try {
+      const browserProvider = new ethers.BrowserProvider(window.ethereum);
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      await setConnection(browserProvider, accounts);
+    } catch {
+      // ignore
     }
-  }, []);
+  }, [setConnection]);
 
   const connect = useCallback(async () => {
     if (!window.ethereum) {
@@ -73,50 +92,78 @@ export function useWeb3() {
     setLoading(true);
     try {
       await window.ethereum.request({ method: 'eth_requestAccounts' });
-      await refresh();
-      const cid = Number(await window.ethereum.request({ method: 'eth_chainId' }));
-      setChainId(cid);
-      if (cid !== BOT_CHAIN.chainId) {
+      const browserProvider = new ethers.BrowserProvider(window.ethereum);
+      const accounts = await window.ethereum.request({ method: 'eth_accounts' });
+      await setConnection(browserProvider, accounts);
+      const network = await browserProvider.getNetwork();
+      if (Number(network.chainId) !== BOT_CHAIN.chainId) {
         await switchToBotChain();
       }
     } finally {
       setLoading(false);
     }
-  }, [refresh, switchToBotChain]);
+  }, [setConnection, switchToBotChain]);
 
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
     setAccount(null);
     setSigner(null);
+    try {
+      if (window.ethereum?.request) {
+        // Ask MetaMask to revoke the dApp connection so the next reload is truly disconnected
+        await window.ethereum.request({
+          method: 'wallet_revokePermissions',
+          params: [{ eth_accounts: {} }],
+        });
+      }
+    } catch {
+      // MetaMask may not support wallet_revokePermissions; clear state anyway
+    }
   }, []);
 
   useEffect(() => {
-    if (!window.ethereum) return;
-    window.ethereum.request({ method: 'eth_accounts' }).then((accounts) => {
-      if (accounts?.[0]) {
-        connect();
-      } else {
-        refresh();
-      }
-    });
+    let cancelled = false;
 
+    const setup = async () => {
+      if (cancelled) return;
+      if (window.ethereum) {
+        await attemptAutoConnect();
+      }
+    };
+
+    setup();
+
+    const handleInit = () => {
+      if (!cancelled) attemptAutoConnect();
+    };
     const handleAccountsChanged = (accounts) => {
       if (accounts.length === 0) {
         setAccount(null);
         setSigner(null);
       } else {
         setAccount(accounts[0]);
-        refresh();
+        attemptAutoConnect();
       }
     };
     const handleChainChanged = () => window.location.reload();
 
-    window.ethereum.on('accountsChanged', handleAccountsChanged);
-    window.ethereum.on('chainChanged', handleChainChanged);
+    // MetaMask injects asynchronously; wait for it if not present yet
+    window.addEventListener('ethereum#initialized', handleInit);
+    window.ethereum?.on('accountsChanged', handleAccountsChanged);
+    window.ethereum?.on('chainChanged', handleChainChanged);
+
+    // Fallback: try again after a short delay in case the provider was slow to inject
+    const fallback = setTimeout(() => {
+      if (!cancelled && window.ethereum) attemptAutoConnect();
+    }, 1500);
+
     return () => {
-      window.ethereum.removeListener('accountsChanged', handleAccountsChanged);
-      window.ethereum.removeListener('chainChanged', handleChainChanged);
+      cancelled = true;
+      clearTimeout(fallback);
+      window.removeEventListener('ethereum#initialized', handleInit);
+      window.ethereum?.removeListener('accountsChanged', handleAccountsChanged);
+      window.ethereum?.removeListener('chainChanged', handleChainChanged);
     };
-  }, [connect, refresh]);
+  }, [attemptAutoConnect]);
 
   return {
     account,
